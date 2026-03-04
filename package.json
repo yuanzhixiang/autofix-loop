@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "node --test",
+    "check": "node --test test/pipeline-smoke.test.js",
     "init": "node ./pipeline/init-demo-repo.mjs",
     "run": "node ./pipeline/dispatcher.mjs",
     "run:replace": "PIPELINE_EXECUTOR=replace node ./pipeline/dispatcher.mjs",
