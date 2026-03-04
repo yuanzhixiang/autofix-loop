@@ -35,6 +35,33 @@ Autofix Loop 是一个可迭代的“自修复流水线”项目：
 codex --version
 ```
 
+## 像 Codex 一样直接聊天
+
+先在工具仓安装全局命令（一次即可）：
+
+```bash
+cd /Users/yuanzhixiang/workspace/project/autofix-loop/autofix-loop
+pnpm link --global
+```
+
+然后你在任意目标仓目录下都可以直接用：
+
+```bash
+autofix-loop "修复 pnpm test 和 pnpm check 失败"
+```
+
+或者进入连续对话模式：
+
+```bash
+autofix-loop chat
+```
+
+说明：
+
+- 命令会自动把“当前目录”当成目标仓库。
+- 默认在当前分支上起修复工作流（可用 `--base` 覆盖）。
+- 如果当前仓库已经健康，会输出 `skipped, no changes needed`，不会硬提交空改动。
+
 ## 快速开始（Demo）
 
 ```bash
@@ -62,6 +89,8 @@ PIPELINE_TASKS_FILE=/absolute/path/to/tasks.jsonl \
 PIPELINE_BASE_BRANCH=main \
 pnpm run run
 ```
+
+如果你不想每次写 `PIPELINE_TASKS_FILE`，优先用上面的 `autofix-loop "<prompt>"` 或 `autofix-loop chat`。
 
 ## 任务格式（JSONL）
 

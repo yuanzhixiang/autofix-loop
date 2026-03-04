@@ -3,11 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "autofix-loop": "./bin/autofix-loop.mjs"
+  },
   "scripts": {
     "test": "node --test",
     "check": "node --test test/pipeline-smoke.test.js",
     "init": "node ./pipeline/init-demo-repo.mjs",
     "run": "node ./pipeline/dispatcher.mjs",
+    "chat": "node ./bin/autofix-loop.mjs chat",
     "run:replace": "PIPELINE_EXECUTOR=replace node ./pipeline/dispatcher.mjs",
     "reset": "node ./pipeline/reset.mjs"
   }
