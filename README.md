@@ -1,6 +1,6 @@
-# AI Pipeline Minimum Demo
+# Autofix Loop
 
-这是一个最小可跑的“AI 自动修复流水线”演示：
+Autofix Loop 是一个最小可跑的“AI 自动修复流水线”项目：
 
 - `dispatcher`：读取任务、分发并行 worker、集成提交。
 - `worker`：在独立 worktree 修复一个任务并提交。
