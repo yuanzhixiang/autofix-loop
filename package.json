@@ -1,0 +1,11 @@
+{
+  "name": "ai-pipeline-minimum-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "init": "node ./pipeline/init-demo-repo.mjs",
+    "run": "node ./pipeline/dispatcher.mjs",
+    "reset": "node ./pipeline/reset.mjs"
+  }
+}
