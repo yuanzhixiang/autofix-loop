@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -9,6 +9,22 @@ import { fileURLToPath } from "node:url";
 
 const toolRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dispatcherScript = path.join(toolRoot, "pipeline", "dispatcher.mjs");
+
+const ACTION_HINTS = [
+  "修复",
+  "fix",
+  "解决",
+  "处理",
+  "改",
+  "重构",
+  "优化",
+  "实现",
+  "添加",
+  "删除",
+  "更新"
+];
+
+const QUESTION_HINTS = ["什么", "为什么", "问题", "状态", "如何", "怎么", "评估", "诊断", "分析", "有没有"];
 
 function parseArgs(argv) {
   const options = {
@@ -59,6 +75,16 @@ Usage:
   autofix-loop "<prompt>"
   autofix-loop chat
 
+Modes:
+  - 问句/分析类输入 => 只做诊断并输出文字回答
+  - 修复类输入       => 执行自动修复流水线
+
+Chat commands:
+  /ask <question>   只诊断，不改代码
+  /run <task>       执行修复流水线
+  /help             显示帮助
+  /exit             退出
+
 Options:
   --base <branch>         Base branch for worktrees (default: current branch)
   --concurrency <n>       Worker concurrency (default: 1)
@@ -67,6 +93,7 @@ Options:
   -h, --help              Show this help
 
 Examples:
+  autofix-loop "这个项目现在有什么问题？"
   autofix-loop "修复 pnpm test 和 pnpm check 失败"
   autofix-loop chat
 `);
@@ -101,6 +128,41 @@ function run(cmd, args, cwd, { capture = false } = {}) {
   });
 }
 
+function normalizeText(text) {
+  return text.trim().toLowerCase();
+}
+
+function classifyPrompt(rawInput) {
+  const input = rawInput.trim();
+  const normalized = normalizeText(input);
+
+  if (normalized === "/help") {
+    return { type: "help" };
+  }
+  if (normalized === "/exit" || normalized === "exit" || normalized === "quit") {
+    return { type: "exit" };
+  }
+  if (normalized.startsWith("/ask ")) {
+    return { type: "ask", prompt: input.slice(5).trim() };
+  }
+  if (normalized.startsWith("/run ")) {
+    return { type: "run", prompt: input.slice(5).trim() };
+  }
+
+  if (/[?？]$/.test(input) || QUESTION_HINTS.some((hint) => input.includes(hint))) {
+    const hasActionHint = ACTION_HINTS.some((hint) => normalized.includes(hint));
+    if (!hasActionHint) {
+      return { type: "ask", prompt: input };
+    }
+  }
+
+  if (ACTION_HINTS.some((hint) => normalized.includes(hint))) {
+    return { type: "run", prompt: input };
+  }
+
+  return { type: "ask", prompt: input };
+}
+
 async function detectCurrentBranch(repoDir) {
   const { stdout } = await run("git", ["rev-parse", "--abbrev-ref", "HEAD"], repoDir, { capture: true });
   return stdout.trim();
@@ -110,7 +172,7 @@ async function ensureGitRepo(repoDir) {
   await run("git", ["rev-parse", "--is-inside-work-tree"], repoDir, { capture: true });
 }
 
-function buildPrompt(userPrompt) {
+function buildFixPrompt(userPrompt) {
   return `${userPrompt}
 
 Run \`pnpm test\` and \`pnpm check\`. If either fails, fix root causes with minimal safe changes until both pass.
@@ -122,6 +184,24 @@ function buildCommitMessage(userPrompt) {
   const trimmed = userPrompt.replace(/\s+/g, " ").trim();
   const short = trimmed.slice(0, 56);
   return short ? `fix: ${short}` : "fix: autofix-loop chat task";
+}
+
+function buildAskPrompt(userPrompt) {
+  return `You are a senior software engineer assistant inside a local repository.
+
+User question: ${userPrompt}
+
+Please inspect the current repository in read-only mode and provide a concise Chinese answer.
+Required workflow:
+1) Check git status briefly.
+2) If package.json has scripts.test/scripts.check, run them and summarize pass/fail.
+3) Identify concrete current problems (if any).
+4) Give the next action in 1-3 steps.
+
+Constraints:
+- Do not modify any file.
+- Do not run git commit/push.
+- Reply in Chinese.`;
 }
 
 async function runDispatcherWithEnv({ repoDir, taskFile, baseBranch, concurrency, attempts, executor }) {
@@ -159,7 +239,7 @@ async function runPromptTask({ repoDir, baseBranch, concurrency, attempts, execu
     id: taskId,
     title: "Chat-driven self-heal task",
     executor,
-    prompt: buildPrompt(prompt),
+    prompt: buildFixPrompt(prompt),
     commitMessage: buildCommitMessage(prompt)
   };
 
@@ -178,11 +258,104 @@ async function runPromptTask({ repoDir, baseBranch, concurrency, attempts, execu
   }
 }
 
+async function askWithCodex({ repoDir, question }) {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "autofix-loop-ask-"));
+  const outputFile = path.join(tempDir, "answer.txt");
+
+  try {
+    await run(
+      "codex",
+      [
+        "exec",
+        "--ephemeral",
+        "-C",
+        repoDir,
+        "--sandbox",
+        "read-only",
+        "-o",
+        outputFile,
+        buildAskPrompt(question)
+      ],
+      repoDir,
+      { capture: true }
+    );
+
+    const answer = (await readFile(outputFile, "utf8")).trim();
+    if (!answer) {
+      console.log("未获取到文本回答。你可以换个问法，或者直接用 /run 发起修复。\n");
+      return;
+    }
+
+    console.log(`\n${answer}\n`);
+  } catch (error) {
+    console.error(`诊断失败: ${error.message}`);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+async function summarizePostRun({ repoDir, baseBranch }) {
+  const branch = await detectCurrentBranch(repoDir);
+  if (!branch.startsWith("auto/integration-")) {
+    console.log("\n本轮没有产生修复提交（通常表示当前仓库已健康）。\n");
+    return;
+  }
+
+  const { stdout } = await run("git", ["log", "--oneline", `${baseBranch}..${branch}`], repoDir, { capture: true });
+  const commits = stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  console.log(`\n本轮已产出修复分支: ${branch}`);
+  if (commits.length > 0) {
+    console.log("修复提交:");
+    for (const line of commits) {
+      console.log(`- ${line}`);
+    }
+  }
+  console.log("");
+}
+
+async function handlePrompt({ repoDir, baseBranch, concurrency, attempts, executor, rawInput }) {
+  const decision = classifyPrompt(rawInput);
+
+  if (decision.type === "help") {
+    printHelp();
+    return { exit: false };
+  }
+
+  if (decision.type === "exit") {
+    return { exit: true };
+  }
+
+  if (!decision.prompt) {
+    console.log("请输入有效内容，或使用 /help 查看帮助。\n");
+    return { exit: false };
+  }
+
+  if (decision.type === "ask") {
+    await askWithCodex({ repoDir, question: decision.prompt });
+    return { exit: false };
+  }
+
+  await runPromptTask({
+    repoDir,
+    baseBranch,
+    concurrency,
+    attempts,
+    executor,
+    prompt: decision.prompt
+  });
+  await summarizePostRun({ repoDir, baseBranch });
+  return { exit: false };
+}
+
 async function runChatMode({ repoDir, baseBranch, concurrency, attempts, executor }) {
-  console.log(`autofix-loop chat mode`);
+  console.log("autofix-loop chat mode");
   console.log(`target repo: ${repoDir}`);
   console.log(`base branch: ${baseBranch}`);
-  console.log(`type /exit to quit\n`);
+  console.log("/ask 提问诊断，/run 发起修复，/help 查看帮助，/exit 退出\n");
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -195,19 +368,19 @@ async function runChatMode({ repoDir, baseBranch, concurrency, attempts, executo
       if (!line) {
         continue;
       }
-      if (line === "/exit" || line === "exit" || line === "quit") {
-        break;
-      }
 
       try {
-        await runPromptTask({
+        const { exit } = await handlePrompt({
           repoDir,
           baseBranch,
           concurrency,
           attempts,
           executor,
-          prompt: line
+          rawInput: line
         });
+        if (exit) {
+          break;
+        }
       } catch (error) {
         console.error(`run failed: ${error.message}`);
       }
@@ -247,13 +420,13 @@ async function main() {
     process.exit(2);
   }
 
-  await runPromptTask({
+  await handlePrompt({
     repoDir,
     baseBranch,
     concurrency,
     attempts,
     executor,
-    prompt
+    rawInput: prompt
   });
 }
 

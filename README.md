@@ -61,6 +61,15 @@ autofix-loop chat
 - 命令会自动把“当前目录”当成目标仓库。
 - 默认在当前分支上起修复工作流（可用 `--base` 覆盖）。
 - 如果当前仓库已经健康，会输出 `skipped, no changes needed`，不会硬提交空改动。
+- 问句会返回文字诊断：`autofix-loop "这个项目现在有什么问题？"`
+- 修复指令会执行流水线：`autofix-loop "修复 pnpm test 和 pnpm check 失败"`
+
+chat 模式可用命令：
+
+- `/ask <question>`：只诊断，不改代码
+- `/run <task>`：执行自动修复
+- `/help`：显示帮助
+- `/exit`：退出
 
 ## 快速开始（Demo）
 
