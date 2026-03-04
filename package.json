@@ -6,6 +6,7 @@
   "scripts": {
     "init": "node ./pipeline/init-demo-repo.mjs",
     "run": "node ./pipeline/dispatcher.mjs",
+    "run:replace": "PIPELINE_EXECUTOR=replace node ./pipeline/dispatcher.mjs",
     "reset": "node ./pipeline/reset.mjs"
   }
 }
