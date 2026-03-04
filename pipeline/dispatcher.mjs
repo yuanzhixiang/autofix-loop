@@ -145,14 +145,14 @@ async function checkoutIntegrationBranch() {
 }
 
 async function integrate(results, taskWorktreeMap) {
-  const successful = results.filter((item) => item.ok);
-  if (successful.length === 0) {
+  const successfulWithCommit = results.filter((item) => item.ok && item.commit);
+  if (successfulWithCommit.length === 0) {
     return null;
   }
 
   const integrationBranch = await checkoutIntegrationBranch();
 
-  for (const result of successful) {
+  for (const result of successfulWithCommit) {
     const taskWorktree = taskWorktreeMap.get(result.id);
     await run("git", ["cherry-pick", result.commit], repoDir);
     const { stdout } = await run("git", ["show", "--name-only", "--pretty=format:%s", "HEAD"], repoDir, { capture: true });
@@ -239,7 +239,11 @@ async function main() {
   for (const item of results) {
     if (item.ok) {
       const changed = Array.isArray(item.changedFiles) ? item.changedFiles.join(", ") : "";
-      console.log(`- ${item.id}: OK (${item.commit}) attempt=${item.attempt}${changed ? ` files=[${changed}]` : ""}`);
+      if (item.skipped) {
+        console.log(`- ${item.id}: OK (skipped, no changes needed) attempt=${item.attempt}`);
+      } else {
+        console.log(`- ${item.id}: OK (${item.commit}) attempt=${item.attempt}${changed ? ` files=[${changed}]` : ""}`);
+      }
     } else {
       console.log(`- ${item.id}: FAIL (${item.error})`);
     }

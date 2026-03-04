@@ -146,7 +146,8 @@ async function attemptTask(repoDir, task, executor, attempt, previousError) {
 
   const changedFiles = await listChangedFiles(repoDir);
   if (changedFiles.length === 0) {
-    throw new Error("No code changes were produced by executor");
+    await runGate(repoDir, task);
+    return { commit: null, changedFiles: [], skipped: true };
   }
 
   if (Array.isArray(task.allowedFiles) && task.allowedFiles.length > 0) {
@@ -159,7 +160,7 @@ async function attemptTask(repoDir, task, executor, attempt, previousError) {
   await runGate(repoDir, task);
 
   const commit = await commitChanges(repoDir, task, changedFiles);
-  return { commit, changedFiles };
+  return { commit, changedFiles, skipped: false };
 }
 
 async function main() {
@@ -182,13 +183,14 @@ async function main() {
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
-        const { commit, changedFiles } = await attemptTask(repoDir, task, executor, attempt, previousError);
+        const { commit, changedFiles, skipped } = await attemptTask(repoDir, task, executor, attempt, previousError);
         const result = {
           id: task.id,
           ok: true,
           executor,
           attempt,
           commit,
+          skipped,
           changedFiles
         };
         console.log(JSON.stringify(result));
